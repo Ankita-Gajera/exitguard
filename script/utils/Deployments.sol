@@ -12,6 +12,7 @@ abstract contract Deployments is Script {
     string internal constant DESTINATION_FILE = "deployments/destination.json";
     string internal constant REACTIVE_FILE = "deployments/reactive.json";
     string internal constant GUARD_FILE = "deployments/guard.json";
+    string internal constant SISTER_FILE = "deployments/sister.json";
 
     /// @dev Salt of the demo's timelock operation, so queue and execute refer to the same one.
     bytes32 internal constant UPGRADE_SALT = keccak256("exitguard-demo-upgrade");
