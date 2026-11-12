@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ExitGuard console</title>
+<meta name="description" content="Deploy, drill and watch a personal ExitGuard on a testnet and Reactive Lasna.">
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #14181f; --muted: #5b6472; --line: #dfe3e8;
+    --accent: #0b6e4f; --accent-ink: #ffffff; --warn: #9a5b00; --bad: #b3261e; --good: #0b6e4f;
+    --code: #eef1f4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --card: #171b21; --ink: #e8ecf1; --muted: #9aa5b4; --line: #2a313b;
+      --accent: #37c191; --accent-ink: #06231a; --warn: #f0b24a; --bad: #ff7b72; --good: #37c191;
+      --code: #1f252d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 28px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  h2 { font-size: 18px; margin: 32px 0 12px; }
+  p { margin: 0 0 12px; }
+  .lede { color: var(--muted); max-width: 62ch; }
+  .bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 16px 0 8px; }
+  button {
+    font: inherit; font-weight: 600; padding: 8px 14px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink);
+  }
+  button.quiet { background: transparent; color: var(--ink); border-color: var(--line); font-weight: 500; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px;
+    margin: 0 0 12px;
+  }
+  .card.done { border-left: 4px solid var(--good); }
+  .card.error { border-left: 4px solid var(--bad); }
+  .card.running { border-left: 4px solid var(--warn); }
+  .head { display: flex; gap: 12px; align-items: baseline; justify-content: space-between; flex-wrap: wrap; }
+  .title { font-weight: 650; }
+  .chain { font-size: 13px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 1px 9px; }
+  .about { color: var(--muted); margin: 6px 0 10px; font-size: 15px; }
+  .note { font-size: 14px; margin: 8px 0 0; }
+  .note.warn { color: var(--warn); }
+  .note.bad { color: var(--bad); overflow-wrap: anywhere; }
+  .note.good { color: var(--good); font-weight: 600; }
+  dl { display: grid; grid-template-columns: minmax(140px, max-content) 1fr; gap: 4px 16px; margin: 10px 0 0; font-size: 14px; }
+  dt { color: var(--muted); }
+  dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+  code, pre { font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  pre { background: var(--code); padding: 12px; border-radius: 8px; overflow-x: auto; margin: 0 0 12px; }
+  a { color: var(--accent); }
+  .who { font-size: 14px; color: var(--muted); }
+  footer { color: var(--muted); font-size: 14px; margin-top: 32px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>ExitGuard console</h1>
+  <p class="lede">A personal tripwire for vault deposits. This page deploys your own ExitGuard on testnets, runs a health
+    check, and plays the demo: a protocol queues an upgrade, and your deposit leaves before the new code goes live.</p>
+
+  <div class="bar">
+    <button id="connect">Connect wallet</button>
+    <span class="who" id="who">Use a throwaway testnet account. Nothing here needs real funds.</span>
+  </div>
+
+  <p class="who" id="chains"></p>
+
+  <h2>Steps</h2>
+  <div id="steps"></div>
+
+  <h2>Status</h2>
+  <div class="bar"><button class="quiet" id="refresh" disabled>Refresh</button></div>
+  <div class="card" id="status"><p class="about">Connect a wallet to read the chains.</p></div>
+
+  <h2>Deployment record</h2>
+  <p class="about">Addresses, transaction hashes and measured latency of this run, for the README and the submission.</p>
+  <pre id="record">{}</pre>
+  <div class="bar">
+    <button class="quiet" id="copy">Copy</button>
+    <button class="quiet" id="reset">Start over</button>
+  </div>
+
+  <footer>ExitGuard runs on <a href="https://reactive.network" rel="noopener">Reactive Network</a>. Testnet demo; not audited.</footer>
+</main>
+
+<script src="vendor/ethers.umd.min.js"></script>
+<script src="artifacts.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
