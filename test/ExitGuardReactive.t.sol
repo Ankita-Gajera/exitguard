@@ -77,7 +77,7 @@ contract ExitGuardReactiveTest is Fixture {
     function test_Constructor_SetsOwnerDestinationAndDefaults() public view {
         assertEq(reactive.owner(), alice);
         assertEq(reactive.destinationChainId(), BASE_SEPOLIA);
-        assertEq(reactive.callbackGasLimit(), 500_000);
+        assertEq(reactive.callbackGasLimit(), 1_000_000);
         assertEq(reactive.cooldown(), 5 minutes);
         assertEq(address(reactive).balance, 1 ether);
         assertEq(address(reactive._SERVICE_PROVIDER()), SYSTEM_ADDR);
@@ -390,7 +390,7 @@ contract ExitGuardReactiveTest is Fixture {
         assertEq(request.sender, address(reactive));
         assertEq(request.chainId, BASE_SEPOLIA);
         assertEq(request.recipient, address(guard));
-        assertEq(request.gasLimit, 500_000);
+        assertEq(request.gasLimit, 1_000_000);
         assertEq(
             request.payload,
             abi.encodeCall(
