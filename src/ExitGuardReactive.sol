@@ -116,7 +116,11 @@ contract ExitGuardReactive is AbstractReactive {
     address public guard;
 
     /// @notice Gas limit requested for callbacks to the guard.
-    uint64 public callbackGasLimit = 500_000;
+    /// @dev The callback proxy keeps part of this for its own accounting, and the guard keeps a reserve to record
+    ///      a failed exit, so the vault sees a good deal less. The first live run on Sepolia, where creating a
+    ///      storage slot costs about five times what it does on mainnet, ran out of gas inside the vault with a
+    ///      limit of 500,000.
+    uint64 public callbackGasLimit = 1_000_000;
 
     /// @notice Minimum number of seconds between two exit requests for the same vault.
     /// @dev One governance action often emits several watched events (a batch of queued calls, an upgrade followed
