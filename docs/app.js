@@ -24,7 +24,8 @@
             currency: "ETH",
             callbackProxy: "0xAa14d9Cd0f788Ca23d11805986C1d8bd035D23b4",
             reactFaucet: "0x9b9BB25f1A81078C544C829c5EB7822d747Cf434",
-            guardFunding: "0.01", // ETH kept by the guard for callbacks
+            guardFunding: "0.005", // ETH kept by the guard for callbacks
+            fees: { maxPriorityFeePerGas: "0.5", maxFeePerGas: "2" }, // gwei
         },
         "base-sepolia": {
             chainId: 84532,
@@ -61,6 +62,39 @@
 
     const DEST = config.destination;
     const REACT = config.reactive;
+
+    // ---------------------------------------------------------------------------------------------------------
+    // Wallet. With several wallet extensions installed, `window.ethereum` can be a router owned by one of them
+    // that refuses to sign on networks it does not know (Reactive Lasna, for one). EIP-6963 lets the page talk
+    // to MetaMask directly, so that is preferred when it announces itself.
+    // ---------------------------------------------------------------------------------------------------------
+
+    const announced = [];
+    let wallet = window.ethereum ?? null;
+    let walletName = wallet ? "browser wallet" : null;
+
+    window.addEventListener("eip6963:announceProvider", (event) => {
+        announced.push(event.detail);
+
+        const metamask = announced.find((detail) => detail.info?.rdns === "io.metamask");
+        const chosen = metamask ?? (window.ethereum ? null : announced[0]);
+
+        if (chosen) {
+            wallet = chosen.provider;
+            walletName = chosen.info?.name ?? "wallet";
+        }
+    });
+    window.dispatchEvent(new Event("eip6963:requestProvider"));
+
+    /// Gas price overrides for the vault chain, when the preset has them. Wallets otherwise apply their own
+    /// defaults, which on a testnet can be thousands of times the going rate.
+    const destinationFees = () =>
+        DEST.fees
+            ? {
+                  maxPriorityFeePerGas: ethers.parseUnits(DEST.fees.maxPriorityFeePerGas, "gwei"),
+                  maxFeePerGas: ethers.parseUnits(DEST.fees.maxFeePerGas, "gwei"),
+              }
+            : {};
     const UPGRADE_SALT = ethers.id("exitguard-demo-upgrade");
     const SKIP_CAUSES = [
         "the position is not armed",
@@ -109,9 +143,9 @@
     /// The wallet's own connection when it is on `chain` (most reliable), otherwise the public RPC.
     async function bestReader(chain) {
         try {
-            const current = await window.ethereum.request({ method: "eth_chainId" });
+            const current = await wallet.request({ method: "eth_chainId" });
             if (BigInt(current) === BigInt(chain.chainId)) {
-                return new ethers.BrowserProvider(window.ethereum, chain.chainId);
+                return new ethers.BrowserProvider(wallet, chain.chainId);
             }
         } catch {
             // fall through to the public RPC
@@ -124,11 +158,11 @@
 
     /// Makes sure the wallet is on `chain` (asking it to add the network if needed) and returns a signer.
     async function signerOn(chain) {
-        const current = await window.ethereum.request({ method: "eth_chainId" });
+        const current = await wallet.request({ method: "eth_chainId" });
 
         if (BigInt(current) !== BigInt(chain.chainId)) {
             try {
-                await window.ethereum.request({
+                await wallet.request({
                     method: "wallet_switchEthereumChain",
                     params: [{ chainId: hexChainId(chain) }],
                 });
@@ -136,7 +170,7 @@
                 const unknown = error?.code === 4902 || error?.data?.originalError?.code === 4902;
                 if (!unknown) throw error;
 
-                await window.ethereum.request({
+                await wallet.request({
                     method: "wallet_addEthereumChain",
                     params: [
                         {
@@ -150,13 +184,13 @@
                 });
             }
 
-            const now = await window.ethereum.request({ method: "eth_chainId" });
+            const now = await wallet.request({ method: "eth_chainId" });
             if (BigInt(now) !== BigInt(chain.chainId)) {
                 throw new Error(`Please switch your wallet to ${chain.name} and try again.`);
             }
         }
 
-        return new ethers.BrowserProvider(window.ethereum, chain.chainId).getSigner(account);
+        return new ethers.BrowserProvider(wallet, chain.chainId).getSigner(account);
     }
 
     const contract = (name, address, runner) => new ethers.Contract(address, ARTIFACTS[name].abi, runner);
@@ -231,7 +265,7 @@
                 const receipt = await send(
                     "faucet",
                     "Faucet",
-                    faucet.request(account, { value: ethers.parseEther(config.faucetAmount) }),
+                    faucet.request(account, { value: ethers.parseEther(config.faucetAmount), ...destinationFees() }),
                 );
                 state.faucet = { tx: receipt.hash };
             },
@@ -258,7 +292,7 @@
                     "demo",
                     "Demo protocol",
                     factory
-                        .deploy(config.timelockDelay, account, config.bob)
+                        .deploy(config.timelockDelay, account, config.bob, destinationFees())
                         .then((deployed) => deployed.deploymentTransaction()),
                 );
                 const deployed = contract("DemoDeployer", receipt.contractAddress, signer);
@@ -335,6 +369,7 @@
                         factory
                             .deploy(DEST.callbackProxy, state.reactive.address, account, {
                                 value: ethers.parseEther(DEST.guardFunding),
+                                ...destinationFees(),
                             })
                             .then((deployed) => deployed.deploymentTransaction()),
                     );
@@ -349,7 +384,7 @@
                     const receipt = await send(
                         "guard",
                         "Allowance",
-                        vault.approve(state.guard.address, ethers.MaxUint256),
+                        vault.approve(state.guard.address, ethers.MaxUint256, destinationFees()),
                     );
 
                     state.guard.approveTx = receipt.hash;
@@ -357,7 +392,11 @@
                 }
 
                 const guard = contract("ExitGuard", state.guard.address, signer);
-                const receipt = await send("guard", "Arm", guard.arm(state.demo.vault, ethers.ZeroAddress));
+                const receipt = await send(
+                    "guard",
+                    "Arm",
+                    guard.arm(state.demo.vault, ethers.ZeroAddress, destinationFees()),
+                );
 
                 state.guard.armTx = receipt.hash;
             },
@@ -425,7 +464,7 @@
             async run() {
                 const signer = await signerOn(DEST);
                 const guard = contract("ExitGuard", state.guard.address, signer);
-                const receipt = await send("drill", "Drill", guard.requestDrill(state.demo.vault));
+                const receipt = await send("drill", "Drill", guard.requestDrill(state.demo.vault, destinationFees()));
                 const requested = receipt.logs
                     .map((log) => parse(guard.interface, log))
                     .find((event) => event?.name === "DrillRequested");
@@ -481,7 +520,15 @@
                     const receipt = await send(
                         "queue",
                         "Queue upgrade",
-                        timelock.schedule(state.demo.vault, 0, upgradeCall(), ethers.ZeroHash, UPGRADE_SALT, delay),
+                        timelock.schedule(
+                            state.demo.vault,
+                            0,
+                            upgradeCall(),
+                            ethers.ZeroHash,
+                            UPGRADE_SALT,
+                            delay,
+                            destinationFees(),
+                        ),
                     );
                     const block = await signer.provider.getBlock(receipt.blockNumber);
 
@@ -581,7 +628,7 @@
                 const receipt = await send(
                     "execute",
                     "Execute upgrade",
-                    timelock.execute(state.demo.vault, 0, upgradeCall(), ethers.ZeroHash, UPGRADE_SALT),
+                    timelock.execute(state.demo.vault, 0, upgradeCall(), ethers.ZeroHash, UPGRADE_SALT, destinationFees()),
                 );
                 const vault = contract("DemoVault", state.demo.vault, signer);
 
@@ -702,7 +749,9 @@
             const rejected = error?.code === "ACTION_REJECTED" || error?.code === 4001;
             notes[stepId] = {
                 kind: "bad",
-                text: rejected ? "You rejected the request in your wallet." : (error?.shortMessage ?? error?.message ?? String(error)),
+                text: rejected
+                    ? "You rejected the request in your wallet."
+                    : (error?.info?.error?.message ?? error?.error?.message ?? error?.shortMessage ?? error?.message ?? String(error)),
             };
         } finally {
             busy = null;
@@ -782,12 +831,12 @@
     // ---------------------------------------------------------------------------------------------------------
 
     async function connect() {
-        if (!window.ethereum) {
+        if (!wallet) {
             document.getElementById("who").textContent = "No wallet found. Install MetaMask, then reload this page.";
             return;
         }
 
-        const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+        const accounts = await wallet.request({ method: "eth_requestAccounts" });
         setAccount(accounts[0]);
     }
 
@@ -796,7 +845,8 @@
 
         if (account) {
             load();
-            document.getElementById("who").innerHTML = `Connected as <code>${escape(account)}</code>`;
+            document.getElementById("who").innerHTML =
+                `Connected as <code>${escape(account)}</code> through ${escape(walletName)}`;
             document.getElementById("connect").textContent = "Connected";
         }
 
@@ -835,7 +885,7 @@
         refresh();
     });
 
-    window.ethereum?.on?.("accountsChanged", (accounts) => {
+    wallet?.on?.("accountsChanged", (accounts) => {
         if (!busy) setAccount(accounts[0]);
     });
 
@@ -846,9 +896,11 @@
 
     render();
 
-    // Reconnect silently if the wallet already trusts this page.
-    window.ethereum
-        ?.request({ method: "eth_accounts" })
-        .then((accounts) => accounts[0] && setAccount(accounts[0]))
-        .catch(() => {});
+    // Reconnect silently if the wallet already trusts this page (after wallets had a moment to announce themselves).
+    setTimeout(() => {
+        wallet
+            ?.request({ method: "eth_accounts" })
+            .then((accounts) => accounts[0] && setAccount(accounts[0]))
+            .catch(() => {});
+    }, 400);
 })();
