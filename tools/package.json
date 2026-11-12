@@ -1,0 +1,12 @@
+{
+  "name": "exitguard-local-demo",
+  "private": true,
+  "type": "module",
+  "description": "Runs the whole ExitGuard story on a local anvil chain, with a stand-in for Reactive Network.",
+  "scripts": {
+    "demo": "node local-demo.mjs"
+  },
+  "dependencies": {
+    "ethers": "^6.13.0"
+  }
+}
