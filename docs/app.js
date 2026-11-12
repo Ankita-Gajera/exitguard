@@ -24,8 +24,8 @@
             currency: "ETH",
             callbackProxy: "0xAa14d9Cd0f788Ca23d11805986C1d8bd035D23b4",
             reactFaucet: "0x9b9BB25f1A81078C544C829c5EB7822d747Cf434",
-            guardFunding: "0.005", // ETH kept by the guard for callbacks
-            fees: { maxPriorityFeePerGas: "0.5", maxFeePerGas: "2" }, // gwei
+            guardFunding: "0.003", // ETH kept by the guard for callbacks
+            fees: { maxPriorityFeePerGas: "0.05", maxFeePerGas: "1" }, // gwei
         },
         "base-sepolia": {
             chainId: 84532,
@@ -747,12 +747,23 @@
             delete notes[stepId];
         } catch (error) {
             const rejected = error?.code === "ACTION_REJECTED" || error?.code === 4001;
-            notes[stepId] = {
-                kind: "bad",
-                text: rejected
-                    ? "You rejected the request in your wallet."
-                    : (error?.info?.error?.message ?? error?.error?.message ?? error?.shortMessage ?? error?.message ?? String(error)),
-            };
+            const inner = error?.info?.error ?? error?.error ?? error;
+            let text = rejected
+                ? "You rejected the request in your wallet."
+                : (inner?.message ?? error?.shortMessage ?? error?.message ?? String(error));
+
+            // MetaMask can refuse to sign on a network it has only just been asked to add (error 4100), even
+            // though the account is connected. Asking for the account permission again fixes it.
+            if (inner?.code === 4100) {
+                try {
+                    await wallet.request({ method: "wallet_requestPermissions", params: [{ eth_accounts: {} }] });
+                    text = "Your wallet had not authorized this network yet. That is fixed now: press Run again.";
+                } catch {
+                    text = "Your wallet has not authorized this page on this network. Reconnect the wallet and try again.";
+                }
+            }
+
+            notes[stepId] = { kind: "bad", text };
         } finally {
             busy = null;
             save();
