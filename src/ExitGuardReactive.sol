@@ -9,7 +9,8 @@ import { IExitGuard } from "./interfaces/IExitGuard.sol";
 
 /// @title ExitGuardReactive: the tripwires behind an ExitGuard.
 /// @notice Lives on Reactive Network. The owner lays tripwires across governance events on any supported chain:
-///         a timelock queueing a call against a vault, a proxy pointing at new code, an owner changing, a pause.
+///         a timelock queueing a call against a vault, a proxy pointing at new code, an owner changing, a multisig
+///         changing its signers, a vault's risk rules entering their own timelock, a pause on another chain.
 ///         When a matching event is emitted, this contract asks the owner's ExitGuard on the destination chain to
 ///         pull the owner's position out of the vault that tripwire protects.
 /// @dev A tripwire is a subscription plus two optional filters that subscriptions cannot express on their own:
@@ -26,6 +27,9 @@ contract ExitGuardReactive is AbstractReactive {
     uint8 public constant REASON_OWNERSHIP_TRANSFER_STARTED = 4;
     uint8 public constant REASON_OWNERSHIP_TRANSFERRED = 5;
     uint8 public constant REASON_PAUSED = 6;
+    uint8 public constant REASON_SIGNERS_CHANGED = 7;
+    uint8 public constant REASON_RULES_CHANGING = 8;
+    uint8 public constant REASON_CURATOR_CHANGED = 9;
 
     // ------------------------------------------------------------------------------------------------------------
     // Topics of the governance events this contract knows how to watch out of the box
@@ -50,6 +54,34 @@ contract ExitGuardReactive is AbstractReactive {
 
     /// @notice `Pausable.Paused`.
     uint256 public constant TOPIC_PAUSED = uint256(keccak256("Paused(address)"));
+
+    /// @notice Compound-style `Timelock.QueueTransaction`. Its target is an indexed topic.
+    uint256 public constant TOPIC_QUEUE_TRANSACTION =
+        uint256(keccak256("QueueTransaction(bytes32,address,uint256,string,bytes,uint256)"));
+
+    /// @notice Safe `AddedOwner`.
+    uint256 public constant TOPIC_SAFE_ADDED_OWNER = uint256(keccak256("AddedOwner(address)"));
+
+    /// @notice Safe `RemovedOwner`.
+    uint256 public constant TOPIC_SAFE_REMOVED_OWNER = uint256(keccak256("RemovedOwner(address)"));
+
+    /// @notice Safe `ChangedThreshold`.
+    uint256 public constant TOPIC_SAFE_CHANGED_THRESHOLD = uint256(keccak256("ChangedThreshold(uint256)"));
+
+    /// @notice MetaMorpho `SubmitTimelock`: a shorter timelock has been proposed.
+    uint256 public constant TOPIC_SUBMIT_TIMELOCK = uint256(keccak256("SubmitTimelock(uint256)"));
+
+    /// @notice MetaMorpho `SubmitGuardian`: a new guardian has been proposed.
+    uint256 public constant TOPIC_SUBMIT_GUARDIAN = uint256(keccak256("SubmitGuardian(address)"));
+
+    /// @notice MetaMorpho `SubmitMarketRemoval`: the forced removal of a market has been proposed.
+    uint256 public constant TOPIC_SUBMIT_MARKET_REMOVAL = uint256(keccak256("SubmitMarketRemoval(address,bytes32)"));
+
+    /// @notice MetaMorpho `SubmitCap`: a higher supply cap has been proposed.
+    uint256 public constant TOPIC_SUBMIT_CAP = uint256(keccak256("SubmitCap(address,bytes32,uint256)"));
+
+    /// @notice MetaMorpho `SetCurator`.
+    uint256 public constant TOPIC_SET_CURATOR = uint256(keccak256("SetCurator(address)"));
 
     // ------------------------------------------------------------------------------------------------------------
     // Limits and sentinels
@@ -260,6 +292,59 @@ contract ExitGuardReactive is AbstractReactive {
     /// @dev Most useful across contracts or chains: a sister deployment being paused is an early sign of trouble.
     function watchPause(uint64 chainId_, address pausable_, address vault_) external onlyOwner returns (uint256 id_) {
         id_ = _add(_plain(chainId_, pausable_, TOPIC_PAUSED, vault_, REASON_PAUSED));
+    }
+
+    /// @notice Exit `vault_` when the Compound-style `timelock_` queues a transaction against `target_`.
+    /// @dev For governance built on Compound's `Timelock` (Governor Alpha and Bravo, and their many forks). There
+    ///      the target is an indexed topic, so the subscription itself filters on it.
+    function watchCompoundTimelock(uint64 chainId_, address timelock_, address target_, address vault_)
+        external
+        onlyOwner
+        returns (uint256 id_)
+    {
+        Tripwire memory wire = _plain(chainId_, timelock_, TOPIC_QUEUE_TRANSACTION, vault_, REASON_UPGRADE_SCHEDULED);
+        wire.topic2 = uint256(uint160(target_));
+
+        id_ = _add(wire);
+    }
+
+    /// @notice Exit `vault_` when the Safe `safe_` gains a signer, loses one, or changes its threshold.
+    /// @dev A multisig that can change a vault directly gives no warning before it acts. A change to who signs,
+    ///      or to how many must, is the nearest thing to one.
+    function watchSafe(uint64 chainId_, address safe_, address vault_)
+        external
+        onlyOwner
+        returns (uint256 addedId_, uint256 removedId_, uint256 thresholdId_)
+    {
+        addedId_ = _add(_plain(chainId_, safe_, TOPIC_SAFE_ADDED_OWNER, vault_, REASON_SIGNERS_CHANGED));
+        removedId_ = _add(_plain(chainId_, safe_, TOPIC_SAFE_REMOVED_OWNER, vault_, REASON_SIGNERS_CHANGED));
+        thresholdId_ = _add(_plain(chainId_, safe_, TOPIC_SAFE_CHANGED_THRESHOLD, vault_, REASON_SIGNERS_CHANGED));
+    }
+
+    /// @notice Exit the MetaMorpho vault `vault_` when a change to its risk rules enters its timelock, or its
+    ///         curator is replaced.
+    /// @dev MetaMorpho delays the changes that loosen a vault's rules (a shorter timelock, a new guardian, the
+    ///      forced removal of a market, a higher supply cap) so that depositors can leave first. This is the
+    ///      leaving.
+    /// @param includeCaps_ Also exit when a higher supply cap is submitted. Curators of busy vaults do that
+    ///        often, so it is a choice.
+    /// @return firstId_ Id of the first tripwire laid; the others follow it.
+    /// @return count_ Number of tripwires laid.
+    function watchMetaMorpho(uint64 chainId_, address vault_, bool includeCaps_)
+        external
+        onlyOwner
+        returns (uint256 firstId_, uint256 count_)
+    {
+        firstId_ = _add(_plain(chainId_, vault_, TOPIC_SUBMIT_TIMELOCK, vault_, REASON_RULES_CHANGING));
+        _add(_plain(chainId_, vault_, TOPIC_SUBMIT_GUARDIAN, vault_, REASON_RULES_CHANGING));
+        _add(_plain(chainId_, vault_, TOPIC_SUBMIT_MARKET_REMOVAL, vault_, REASON_RULES_CHANGING));
+        _add(_plain(chainId_, vault_, TOPIC_SET_CURATOR, vault_, REASON_CURATOR_CHANGED));
+        count_ = 4;
+
+        if (includeCaps_) {
+            _add(_plain(chainId_, vault_, TOPIC_SUBMIT_CAP, vault_, REASON_RULES_CHANGING));
+            count_ = 5;
+        }
     }
 
     /// @notice Lays a fully custom tripwire.
