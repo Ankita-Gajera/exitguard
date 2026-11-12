@@ -14,7 +14,7 @@ const ROOT = join(HERE, "..");
 const read = (file, name = file) => JSON.parse(readFileSync(join(ROOT, "out", `${file}.sol`, `${name}.json`), "utf8"));
 
 // Contracts the console deploys need their bytecode; the rest only their ABI.
-const deployable = ["ExitGuard", "ExitGuardReactive", "DemoDeployer"];
+const deployable = ["ExitGuard", "ExitGuardReactive", "DemoDeployer", "DemoSister"];
 const abiOnly = ["DemoVault", "MockUSD", "TimelockController"];
 
 const artifacts = {};
