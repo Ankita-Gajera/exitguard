@@ -9,6 +9,22 @@ import { IExitGuard } from "../src/interfaces/IExitGuard.sol";
 import { Fixture } from "./utils/Fixture.sol";
 import { MockSystemContract } from "./mocks/MockSystemContract.sol";
 
+/// @dev The events behind the ready-made tripwires, as their projects declare them: Compound's `Timelock`,
+///      Safe's `OwnerManager`, and MetaMorpho's `EventsLib` (whose `Id` is a `bytes32`).
+interface IGovernanceEvents {
+    event QueueTransaction(
+        bytes32 indexed txHash, address indexed target, uint256 value, string signature, bytes data, uint256 eta
+    );
+    event AddedOwner(address indexed owner);
+    event RemovedOwner(address indexed owner);
+    event ChangedThreshold(uint256 threshold);
+    event SubmitTimelock(uint256 newTimelock);
+    event SubmitGuardian(address indexed newGuardian);
+    event SubmitMarketRemoval(address indexed caller, bytes32 indexed id);
+    event SubmitCap(address indexed caller, bytes32 indexed id, uint256 cap);
+    event SetCurator(address indexed newCurator);
+}
+
 contract ExitGuardReactiveTest is Fixture {
     address internal vault = makeAddr("vault");
     address internal otherVault = makeAddr("otherVault");
@@ -38,6 +54,30 @@ contract ExitGuardReactiveTest is Fixture {
             timelock,
             _topics(bytes32(reactive.TOPIC_CALL_SCHEDULED()), keccak256("operation"), bytes32(0)),
             _scheduledData(target_)
+        );
+    }
+
+    /// @dev Compound's `QueueTransaction` for a transaction against `target_`.
+    function _queued(address target_) internal view returns (IReactive.LogRecord memory) {
+        return _record(
+            BASE_SEPOLIA,
+            timelock,
+            _topics(
+                bytes32(reactive.TOPIC_QUEUE_TRANSACTION()),
+                keccak256("transaction"),
+                bytes32(uint256(uint160(target_)))
+            ),
+            abi.encode(uint256(0), "upgradeTo(address)", bytes(""), uint256(2 days))
+        );
+    }
+
+    /// @dev MetaMorpho's `SubmitCap` emitted by `vault_`.
+    function _capSubmitted(address vault_) internal view returns (IReactive.LogRecord memory) {
+        return _record(
+            BASE_SEPOLIA,
+            vault_,
+            _topics(bytes32(reactive.TOPIC_SUBMIT_CAP()), bytes32(uint256(uint160(stranger))), keccak256("market")),
+            abi.encode(uint256(1_000_000e18))
         );
     }
 
@@ -200,6 +240,120 @@ contract ExitGuardReactiveTest is Fixture {
         );
     }
 
+    function test_WatchCompoundTimelock_FiltersOnTheIndexedTarget() public {
+        vm.prank(alice);
+        uint256 id = reactive.watchCompoundTimelock(BASE_SEPOLIA, timelock, vault, vault);
+
+        ExitGuardReactive.Tripwire memory wire = reactive.tripwire(id);
+
+        assertEq(wire.topic0, reactive.TOPIC_QUEUE_TRANSACTION());
+        assertEq(wire.topic2, uint256(uint160(vault)));
+        assertEq(wire.dataWord, reactive.NO_DATA_MATCH());
+        assertEq(wire.reason, reactive.REASON_UPGRADE_SCHEDULED());
+        assertTrue(
+            system.isSubscribed(
+                address(reactive),
+                BASE_SEPOLIA,
+                timelock,
+                reactive.TOPIC_QUEUE_TRANSACTION(),
+                any,
+                uint256(uint160(vault)),
+                any
+            ),
+            "the subscription itself filters on the target"
+        );
+
+        // Queued against some other contract: not our business.
+        _react(_queued(otherVault));
+        assertEq(system.callbackCount(), 0);
+
+        // Queued against the vault: exit.
+        _react(_queued(vault));
+        assertEq(system.callbackCount(), 1);
+    }
+
+    function test_WatchSafe_CoversSignersAndThreshold() public {
+        address safe = makeAddr("safe");
+
+        vm.prank(alice);
+        (uint256 addedId, uint256 removedId, uint256 thresholdId) = reactive.watchSafe(BASE_SEPOLIA, safe, vault);
+
+        assertEq(reactive.tripwire(addedId).topic0, reactive.TOPIC_SAFE_ADDED_OWNER());
+        assertEq(reactive.tripwire(removedId).topic0, reactive.TOPIC_SAFE_REMOVED_OWNER());
+        assertEq(reactive.tripwire(thresholdId).topic0, reactive.TOPIC_SAFE_CHANGED_THRESHOLD());
+        assertEq(reactive.tripwire(addedId).reason, reactive.REASON_SIGNERS_CHANGED());
+        assertEq(reactive.tripwiresOf(vault), 3);
+
+        // The multisig lowers its threshold to one signature.
+        IReactive.LogRecord memory record = _record(
+            BASE_SEPOLIA, safe, _topics(bytes32(reactive.TOPIC_SAFE_CHANGED_THRESHOLD())), abi.encode(uint256(1))
+        );
+        _react(record);
+
+        assertEq(system.callbackCount(), 1);
+        assertEq(
+            system.callbackAt(0).payload,
+            abi.encodeCall(
+                IExitGuard.exit, (address(0), vault, reactive.REASON_SIGNERS_CHANGED(), BASE_SEPOLIA, record.txHash)
+            )
+        );
+    }
+
+    function test_WatchMetaMorpho_WatchesTheVaultsOwnTimelock() public {
+        vm.prank(alice);
+        (uint256 firstId, uint256 count) = reactive.watchMetaMorpho(BASE_SEPOLIA, vault, false);
+
+        assertEq(count, 4);
+        assertEq(reactive.tripwiresOf(vault), 4);
+        assertEq(reactive.tripwire(firstId).topic0, reactive.TOPIC_SUBMIT_TIMELOCK());
+        assertEq(reactive.tripwire(firstId + 1).topic0, reactive.TOPIC_SUBMIT_GUARDIAN());
+        assertEq(reactive.tripwire(firstId + 2).topic0, reactive.TOPIC_SUBMIT_MARKET_REMOVAL());
+        assertEq(reactive.tripwire(firstId + 3).topic0, reactive.TOPIC_SET_CURATOR());
+        assertEq(reactive.tripwire(firstId).source, vault, "the vault announces its own changes");
+        assertEq(reactive.tripwire(firstId).reason, reactive.REASON_RULES_CHANGING());
+        assertEq(reactive.tripwire(firstId + 3).reason, reactive.REASON_CURATOR_CHANGED());
+
+        // A higher supply cap is routine for this depositor: no exit.
+        _react(_capSubmitted(vault));
+        assertEq(system.callbackCount(), 0);
+
+        // A shorter timelock is not.
+        _react(
+            _record(
+                BASE_SEPOLIA, vault, _topics(bytes32(reactive.TOPIC_SUBMIT_TIMELOCK())), abi.encode(uint256(1 days))
+            )
+        );
+        assertEq(system.callbackCount(), 1);
+    }
+
+    function test_WatchMetaMorpho_CanIncludeCapIncreases() public {
+        vm.prank(alice);
+        (uint256 firstId, uint256 count) = reactive.watchMetaMorpho(BASE_SEPOLIA, vault, true);
+
+        assertEq(count, 5);
+        assertEq(reactive.tripwiresOf(vault), 5);
+        assertEq(reactive.tripwire(firstId + 4).topic0, reactive.TOPIC_SUBMIT_CAP());
+
+        _react(_capSubmitted(vault));
+        assertEq(system.callbackCount(), 1);
+    }
+
+    function test_PresetTopics_MatchTheProjectsOwnEvents() public view {
+        assertEq(reactive.TOPIC_QUEUE_TRANSACTION(), uint256(IGovernanceEvents.QueueTransaction.selector), "Compound");
+        assertEq(reactive.TOPIC_SAFE_ADDED_OWNER(), uint256(IGovernanceEvents.AddedOwner.selector), "Safe");
+        assertEq(reactive.TOPIC_SAFE_REMOVED_OWNER(), uint256(IGovernanceEvents.RemovedOwner.selector), "Safe");
+        assertEq(reactive.TOPIC_SAFE_CHANGED_THRESHOLD(), uint256(IGovernanceEvents.ChangedThreshold.selector), "Safe");
+        assertEq(reactive.TOPIC_SUBMIT_TIMELOCK(), uint256(IGovernanceEvents.SubmitTimelock.selector), "MetaMorpho");
+        assertEq(reactive.TOPIC_SUBMIT_GUARDIAN(), uint256(IGovernanceEvents.SubmitGuardian.selector), "MetaMorpho");
+        assertEq(
+            reactive.TOPIC_SUBMIT_MARKET_REMOVAL(),
+            uint256(IGovernanceEvents.SubmitMarketRemoval.selector),
+            "MetaMorpho"
+        );
+        assertEq(reactive.TOPIC_SUBMIT_CAP(), uint256(IGovernanceEvents.SubmitCap.selector), "MetaMorpho");
+        assertEq(reactive.TOPIC_SET_CURATOR(), uint256(IGovernanceEvents.SetCurator.selector), "MetaMorpho");
+    }
+
     function test_WellKnownTopics_MatchTheStandards() public view {
         assertEq(
             reactive.TOPIC_UPGRADED(), 0xbc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b, "ERC-1967"
@@ -230,6 +384,15 @@ contract ExitGuardReactiveTest is Fixture {
 
         vm.expectRevert(ExitGuardReactive.NotOwner.selector);
         reactive.watchPause(BASE_SEPOLIA, sister, vault);
+
+        vm.expectRevert(ExitGuardReactive.NotOwner.selector);
+        reactive.watchCompoundTimelock(BASE_SEPOLIA, timelock, vault, vault);
+
+        vm.expectRevert(ExitGuardReactive.NotOwner.selector);
+        reactive.watchSafe(BASE_SEPOLIA, sister, vault);
+
+        vm.expectRevert(ExitGuardReactive.NotOwner.selector);
+        reactive.watchMetaMorpho(BASE_SEPOLIA, vault, true);
 
         vm.expectRevert(ExitGuardReactive.NotOwner.selector);
         reactive.addTripwire(_custom(any, any, any, 255, bytes32(0)));

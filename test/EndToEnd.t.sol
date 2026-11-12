@@ -14,6 +14,8 @@ import { ERC4626Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ER
 import { IExitGuard } from "../src/interfaces/IExitGuard.sol";
 import { DemoVault } from "../src/demo/DemoVault.sol";
 import { DemoVaultV2 } from "../src/demo/DemoVaultV2.sol";
+import { DemoSister } from "../src/demo/DemoSister.sol";
+import { Pausable } from "@openzeppelin/contracts/utils/Pausable.sol";
 import { Fixture } from "./utils/Fixture.sol";
 
 /// @notice The whole story, against real governance machinery: an ERC-4626 vault behind a UUPS proxy, owned by an
@@ -164,14 +166,44 @@ contract EndToEndTest is Fixture {
 
     function test_TroubleOnAnotherChainTriggersAnExitHere() public {
         // The same protocol runs on Ethereum. If that deployment is paused, Alice wants out of this one.
+        DemoSister onEthereum = new DemoSister(admin);
+
         vm.prank(alice);
-        reactive.watchPause(ETHEREUM_SEPOLIA, sister, address(vault));
+        reactive.watchPause(ETHEREUM_SEPOLIA, address(onEthereum), address(vault));
 
-        uint256 delivered =
-            _pipe(_record(ETHEREUM_SEPOLIA, sister, _topics(bytes32(reactive.TOPIC_PAUSED())), abi.encode(admin)));
+        // Incident response on Ethereum.
+        vm.recordLogs();
+        vm.prank(admin);
+        onEthereum.pause();
+        Vm.Log memory paused = _find(vm.getRecordedLogs(), address(onEthereum), Pausable.Paused.selector);
 
-        assertEq(delivered, 1);
-        assertEq(usd.balanceOf(alice), 1_000e18);
+        assertEq(_pipe(_record(ETHEREUM_SEPOLIA, paused)), 1, "one exit callback, on this chain");
+
+        assertEq(usd.balanceOf(alice), 1_000e18, "Alice is out before the trouble can reach this deployment");
+        assertEq(vault.balanceOf(bob), 1_000e18, "Bob is still in");
+        assertEq(vault.version(), "1", "nothing has happened to this vault");
+
+        // The all-clear is not a tripwire.
+        vm.recordLogs();
+        vm.prank(admin);
+        onEthereum.unpause();
+        Vm.Log memory unpaused = _find(vm.getRecordedLogs(), address(onEthereum), Pausable.Unpaused.selector);
+
+        assertEq(_pipe(_record(ETHEREUM_SEPOLIA, unpaused)), 0);
+    }
+
+    function test_SisterDeployment_OnlyItsGuardianCanPause() public {
+        DemoSister onEthereum = new DemoSister(admin);
+
+        vm.expectRevert();
+        onEthereum.pause();
+
+        vm.prank(admin);
+        onEthereum.pause();
+        assertTrue(onEthereum.paused());
+
+        vm.expectRevert();
+        onEthereum.unpause();
     }
 
     function test_ExitGoesToAColdWallet() public {
