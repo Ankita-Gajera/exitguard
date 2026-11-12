@@ -300,6 +300,7 @@
     }
 
     const number = (value) => Number(value).toLocaleString("en-US");
+    const blocks = (count) => `${count} ${count === 1 ? "block" : "blocks"}`;
 
     function rehearsalText(result) {
         if (!result) return "not available from this page";
@@ -573,7 +574,7 @@
                 state.drill.rehearsal = await rehearse().catch(() => null);
             },
             facts: () => [
-                ["Round trip", escape(`${state.drill.seconds} s, ${state.drill.blocks} blocks on ${DEST.name}`)],
+                ["Round trip", escape(`${state.drill.seconds} s, ${blocks(state.drill.blocks)} on ${DEST.name}`)],
                 ["Tripwires on this vault", escape(state.drill.tripwires)],
                 ["Request", tx(DEST, state.drill.requestTx)],
                 ["Answer (callback)", tx(DEST, state.drill.passedTx)],
@@ -677,7 +678,7 @@
                 rows.push(
                     [
                         "Event to exit",
-                        escape(`${state.exit.latencySeconds} s, ${state.exit.latencyBlocks} blocks on ${DEST.name}`),
+                        escape(`${state.exit.latencySeconds} s, ${blocks(state.exit.latencyBlocks)} on ${DEST.name}`),
                     ],
                     ["1. Origin event", tx(DEST, state.exit.scheduleTx)],
                     ["2. Reactive transaction", state.exit.reactiveTx ? tx(REACT, state.exit.reactiveTx) : "see the explorer"],
