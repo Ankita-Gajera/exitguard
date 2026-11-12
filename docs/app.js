@@ -1200,8 +1200,13 @@
     const SCAN = window.ExitGuardScan;
     const scanChains = { ...(config.scanChains ?? {}), ...SCAN.CHAINS };
 
-    /// Vaults to try the scan on. The addresses were read back from the chain when this list was written.
-    const EXAMPLES = config.scanExamples ?? [];
+    /// Vaults to try the scan on, chosen because they are built differently. Each address was read back from
+    /// the chain (name and symbol) when this list was written.
+    const EXAMPLES = config.scanExamples ?? [
+        { label: "sDAI", chain: "ethereum", address: "0x83F20F44975D03b1b09e64809B757c47f942BEeA" },
+        { label: "sUSDe", chain: "ethereum", address: "0x9D39A5DE30e57443BfF2A8307A4256c8797A3497" },
+        { label: "steakUSDC", chain: "ethereum", address: "0xBEEF01735c132Ada46AA9aA4c54623cAA92A64CB" },
+    ];
 
     const scanKeyOf = (chain) => Object.keys(scanChains).find((key) => scanChains[key].chainId === chain.chainId);
 
