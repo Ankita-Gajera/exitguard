@@ -1,0 +1,68 @@
+{
+  "note": "First live run, 12 Nov 2026, 08:07 UTC. The pipeline worked end to end (origin event -> reactive transaction -> callback, 12 s), but the redemption did not complete: the callback gas limit was 500,000 and, replayed as a simulation, the exit needs about 501,000 on Sepolia. Outcome: ExitFailed. The guard stayed armed, as designed. Kept for the record.",
+  "account": "0xC5f57A210454baafE9fc145bBf161deF3bea3d4E",
+  "destination": {
+    "chain": "Ethereum Sepolia",
+    "chainId": 11155111,
+    "callbackProxy": "0xAa14d9Cd0f788Ca23d11805986C1d8bd035D23b4"
+  },
+  "reactiveNetwork": {
+    "chain": "Reactive Lasna",
+    "chainId": 5318007
+  },
+  "faucet": {
+    "tx": "0x3622a81bc206b72b5b415f27ea38356fbf8969b4dfd14be3214a2f349d8204b2"
+  },
+  "demo": {
+    "tx": "0xa0ed48543125cf31a22114db1a3a23b3bbcbefea387e90e7e5d71d6b8518d52a",
+    "usd": "0xfE72050B23A7b84b5A94cFD2ba54e85A0A86dc8D",
+    "timelock": "0x914c6f3fecBaa56442B2aEe14820b6A79a5704A6",
+    "vault": "0x221eA318A54aC4BB62eD177789a85f4d2e137E70",
+    "vaultV2": "0x85e07D0d14af8a3f68b617d5ad55564240D5CaFF"
+  },
+  "reactive": {
+    "address": "0x8F0425d7ae9Be2954f83b147fD3347D2649a8eF7",
+    "tx": "0x1204d7fc711f13bddb57958eaf635b5270615e1658eb8ce5fa29c21cf62cd918"
+  },
+  "guard": {
+    "address": "0x22a0667101cfEBc9B756fcB831585Fc9Bf5bd4ea",
+    "tx": "0xcc1e4066b9ffd8735f820a501db9f2e26d3d20b840b449ef08fa53f7975ee328",
+    "approveTx": "0x203c99e221283b4a9e13a51560019f636826e70fe1bd650f088c56ff496e29df",
+    "armTx": "0x4f406a01fe9758ec27e7c790572b126630261e6c4230bedb7b44198f5f39a566"
+  },
+  "tripwires": {
+    "setGuardTx": "0xa2fc1f1f9973d7f410f191f9bd46942d479f882e1b9c0f367e7305aba4c4a97e",
+    "timelockTx": "0xcb7706c605b4a9bb7a90ba79f713903e898df65d9dc3a4ef11c2da699aaad043",
+    "proxyTx": "0xf62fed460fa3c8c5becf68db5b7281c7bdafca981d92a9d6e088686d9170d21e"
+  },
+  "drill": {
+    "nonce": 3,
+    "requestTx": "0x644c5c3207f352acadec159292179f5dc1b642965103d38f67d287ccf79bcc21",
+    "requestBlock": 12117562,
+    "seconds": 12,
+    "blocks": 1,
+    "tripwires": 3,
+    "passedTx": "0x50bbf6fe413c9b1880ba094fbecfa5f27ebfeaa04e2a5b087960ec7bcb04c955"
+  },
+  "exit": {
+    "scheduleTx": "0x94916d2475a632d6b1881ebd2cfdefc291b43fc989d1ca51103982e51449802e",
+    "scheduleBlock": 12117555,
+    "scheduleTime": 1794470832,
+    "executableAt": 1794470952,
+    "outcome": "ExitFailed",
+    "exitTx": "0x550bbb0868c6397d5ef56356d30ea3a5ac9a82efcd5964fc4da5cec115c84d62",
+    "exitBlock": 12117556,
+    "exitTime": 1794470844,
+    "latencySeconds": 12,
+    "latencyBlocks": 1,
+    "reactiveTx": "0x50e442b1037b75ed966bc8d41ae4018d842b0e8de50bcb59fe07be7bd579504d",
+    "callbackGasLimit": 500000,
+    "callbackGasUsed": 252976,
+    "minimumWorkingGasLimit": "between 500,781 and 501,562 (eth_simulateV1 replay of the delivery)"
+  },
+  "upgrade": {
+    "tx": "0x9b97dc30ab642043c38932e981b06aae3ced186dfaff2cea46dea9b6f5c10766",
+    "version": "2",
+    "bobCanRedeem": "0.0"
+  }
+}

@@ -1,0 +1,82 @@
+{
+  "note": "Second live run, 12 Nov 2026, 08:40 UTC, with the default callback gas limit raised to 1,000,000. Outcome: Exited. All 1,000 shares were redeemed one block after the upgrade was queued, 132 s before it was executed.",
+  "console": "https://ankita-gajera.github.io/exitguard/",
+  "account": "0xC5f57A210454baafE9fc145bBf161deF3bea3d4E",
+  "destination": {
+    "chain": "Ethereum Sepolia",
+    "chainId": 11155111,
+    "callbackProxy": "0xAa14d9Cd0f788Ca23d11805986C1d8bd035D23b4"
+  },
+  "reactiveNetwork": {
+    "chain": "Reactive Lasna",
+    "chainId": 5318007
+  },
+  "demo": {
+    "tx": "0x5c67c7f72dda51d932f7aa24baef48bf84c1ef51bc15d81793b3f91800d1f466",
+    "usd": "0x21E85A77Cb6C087916074e43154e0061aB8D3c96",
+    "timelock": "0xE3ED4aD11BF6fe15759823b193AFD14C71472A28",
+    "vault": "0xe05b7460195159CdF84Ad423791e1085FE7433Db",
+    "vaultV2": "0xC59BD0d4d74a4699d4B9F2Cc12c692d99135B3fb"
+  },
+  "reactive": {
+    "address": "0x1c3087f5Eeffe17Cb34C605367263b0Be368698d",
+    "tx": "0x111f1b0dfe8617246e7304cc99dc5870a60d271862d39480c5cb67d2aa1b51e7"
+  },
+  "guard": {
+    "address": "0x854cF588EBfd4138b3208A946713470E4Bb794AB",
+    "tx": "0x8b90dc96ba8d4b417b811071182896e39a378b1b150517a750c8326afd0604cd",
+    "approveTx": "0xf1e07001a996031990712ff0d9a4e5ce37dcfbdfab5e64b1f9bdee93b7665c09",
+    "armTx": "0x61477b8bfd0dab9effe36c7e958855613b28417be0537e6ae8a9ebbd998ced1f"
+  },
+  "tripwires": {
+    "setGuardTx": "0x7bb3bfda20dd330164e92a1851d1eeb784d53f4af7efa285b886b58aef009055",
+    "timelockTx": "0x1c31baaa4273d11ad8487d57b717296bf80392d9561d909b52ddce91111298db",
+    "proxyTx": "0x13e7b141a473b987178f0eec6a6320de0dde8b75c3180e04df30fa275d381201"
+  },
+  "drill": {
+    "nonce": 1,
+    "requestTx": "0x8a37c8ba517d903aedce0ac33e8cbe56c845528f552aec7cc366ce72c362f37a",
+    "requestBlock": 12117718,
+    "seconds": 12,
+    "blocks": 1,
+    "tripwires": 3,
+    "passedTx": "0x22b76194258673d2ad869c33ae9d2834d2d92136ec82a3b89a2e9323df0aae77",
+    "rehearsal": {
+      "outcome": "Exited",
+      "gasUsed": 229200,
+      "gasLimit": 1000000
+    }
+  },
+  "exit": {
+    "scheduleTx": "0x2cda204e8981d86a28661b3cd89b24235280bb9d6082ca034385d99e66e30a69",
+    "scheduleBlock": 12117722,
+    "scheduleTime": 1794472848,
+    "executableAt": 1794472968,
+    "outcome": "Exited",
+    "reactiveTx": "0xbadb4e835e045a81d5539e1296890e02ecf1fe12b4b482628e1874b185168c5e",
+    "reactiveBlock": 8151590,
+    "reactiveTime": 1794472848,
+    "exitTx": "0x6f721997ef4ef1310231947fec295ced88e21d3c21a4217fe1cf96e67ca5b3be",
+    "exitBlock": 12117723,
+    "exitTime": 1794472860,
+    "latencySeconds": 12,
+    "latencyBlocks": 1,
+    "shares": "1000.0",
+    "assets": "1000.0",
+    "callbackGasLimit": 1000000,
+    "callbackGasUsed": 255444
+  },
+  "upgrade": {
+    "tx": "0x3b3dd030685fe15ebfd5f3d2eca252a2cf832d85f560935fff1dea7fbfada0b2",
+    "block": 12117734,
+    "time": 1794472992,
+    "version": "2",
+    "bobCanRedeem": "0.0"
+  },
+  "after": {
+    "yourTestDollars": "1000.0",
+    "yourVaultShares": "0.0",
+    "bobVaultShares": "1000.0",
+    "bobCanRedeem": "0.0"
+  }
+}
