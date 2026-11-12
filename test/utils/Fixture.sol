@@ -30,7 +30,7 @@ abstract contract Fixture is Test {
     uint64 internal constant ETHEREUM_SEPOLIA = 11155111;
     uint64 internal constant BASE_SEPOLIA = 84532;
 
-    uint64 internal constant DEFAULT_CALLBACK_GAS = 500_000;
+    uint64 internal constant DEFAULT_CALLBACK_GAS = 1_000_000;
 
     MockSystemContract internal system;
     MockCallbackProxy internal proxy;
