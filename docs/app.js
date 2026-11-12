@@ -24,7 +24,7 @@
             currency: "ETH",
             callbackProxy: "0xAa14d9Cd0f788Ca23d11805986C1d8bd035D23b4",
             reactFaucet: "0x9b9BB25f1A81078C544C829c5EB7822d747Cf434",
-            guardFunding: "0.003", // ETH kept by the guard for callbacks
+            guardFunding: "0.001", // ETH kept by the guard for callbacks
             // gwei. Wallets reserve gas limit x max fee up front, and the demo deployment needs about 42 million
             // gas on Sepolia, so the ceiling is kept low. The base fee there is a few wei.
             fees: { maxPriorityFeePerGas: "0.05", maxFeePerGas: "0.1" },
@@ -37,7 +37,29 @@
             currency: "ETH",
             callbackProxy: "0x476F44b11F5C942c58f4c8E3d0300E5710743585",
             reactFaucet: "0x2afaFD298b23b62760711756088F75B7409f5967",
-            guardFunding: "0.005",
+            guardFunding: "0.001",
+        },
+    };
+
+    // The "other chain" of the cross-chain trigger, for each vault chain. `bridge` is the chain's own bridge
+    // contract on the vault chain, which moves test ETH there.
+    const SISTERS = {
+        sepolia: {
+            chainId: 84532,
+            name: "Base Sepolia",
+            rpc: "https://sepolia.base.org",
+            explorer: "https://sepolia.basescan.org",
+            currency: "ETH",
+            // Base's L1StandardBridge on Ethereum Sepolia. Checked on-chain: its messenger's portal points at a
+            // SystemConfig whose l2ChainId() is 84532.
+            bridge: { address: "0xfd0Bf71F60660E2f608ed56e1659C450eB113120", amount: "0.0015" },
+        },
+        "base-sepolia": {
+            chainId: 11155111,
+            name: "Ethereum Sepolia",
+            rpc: "https://ethereum-sepolia-rpc.publicnode.com",
+            explorer: "https://sepolia.etherscan.io",
+            currency: "ETH",
         },
     };
 
@@ -46,6 +68,7 @@
 
     const config = {
         destination: DESTINATIONS[destinationKey],
+        sister: SISTERS[destinationKey],
         reactive: {
             chainId: 5318007,
             name: "Reactive Lasna",
@@ -57,13 +80,14 @@
         bob: "0x0000000000000000000000000000000000000B0b", // the depositor without ExitGuard
         timelockDelay: 120, // seconds
         faucetAmount: "0.03", // ETH sent to the faucet: 3 test REACT
-        reactiveFunding: "0.5", // test REACT kept by the reactive contract
+        reactiveFunding: "0.3", // test REACT kept by the reactive contract
         waitSeconds: 240, // how long to wait for Reactive Network before giving up
         ...(window.EXITGUARD_CONFIG ?? {}),
     };
 
     const DEST = config.destination;
     const REACT = config.reactive;
+    const SISTER = config.sister ?? null;
 
     // ---------------------------------------------------------------------------------------------------------
     // Wallet. With several wallet extensions installed, `window.ethereum` can be a router owned by one of them
@@ -585,11 +609,19 @@
             id: "queue",
             title: "The protocol queues an upgrade",
             chain: DEST,
+            section: {
+                title: "Trigger A: an upgrade is queued",
+                about: "The vault's own timelock announces a change. Everything happens on the vault's chain.",
+            },
             about: () =>
                 "You now play the protocol's admin and queue an upgrade of the vault in the timelock. That emits " +
                 "CallScheduled with the vault as target, which is the tripwire. Your shares should be redeemed within " +
                 "seconds, while the vault still runs the old code.",
-            ready: () => !!state.drill?.passedTx,
+            ready: () => !!state.drill?.passedTx && !state.incident?.outcome,
+            blocked: () =>
+                state.incident?.outcome && !state.exit?.outcome
+                    ? "Your position already left in this run (trigger B). Start over to try this one."
+                    : null,
             done: () => !!state.exit?.outcome,
             async run() {
                 const signer = await signerOn(DEST);
@@ -724,6 +756,227 @@
                 ["Transaction", tx(DEST, state.upgrade.tx)],
             ],
         },
+        {
+            id: "bridge",
+            title: `Get test ETH on ${SISTER?.name}`,
+            chain: DEST,
+            optional: true,
+            hidden: () => !SISTER?.bridge,
+            section: {
+                title: "Trigger B: trouble on another chain",
+                about:
+                    "The same protocol runs on a second chain. When that deployment is paused, you leave this one, " +
+                    "before the trouble can spread.",
+            },
+            about: () =>
+                `Sends ${SISTER.bridge.amount} ${DEST.currency} through ${SISTER.name}'s own bridge; it arrives at the ` +
+                `same address there a few minutes later. Skip this if the wallet already holds ${SISTER.currency} on ` +
+                `${SISTER.name}.`,
+            ready: () => true,
+            done: () => !!state.bridge?.arrived,
+            async run() {
+                if (!state.bridge?.tx) {
+                    const signer = await signerOn(DEST);
+                    const bridge = new ethers.Contract(
+                        SISTER.bridge.address,
+                        ["function bridgeETH(uint32 minGasLimit, bytes extraData) payable"],
+                        signer,
+                    );
+                    const before = await reader(SISTER).getBalance(account);
+                    const receipt = await send(
+                        "bridge",
+                        "Bridge",
+                        bridge.bridgeETH(200000, "0x", {
+                            value: ethers.parseEther(SISTER.bridge.amount),
+                            ...destinationFees(),
+                        }),
+                    );
+
+                    state.bridge = { tx: receipt.hash, before: before.toString() };
+                    save();
+                }
+
+                const arrived = await waitFor("bridge", `Waiting for the test ETH to arrive on ${SISTER.name}`, async () =>
+                    (await reader(SISTER).getBalance(account)) > BigInt(state.bridge.before) ? true : null,
+                );
+
+                if (!arrived) {
+                    throw new Error(
+                        `Not there yet. Deposits to ${SISTER.name} usually take a few minutes: press the button again ` +
+                            `to keep waiting.`,
+                    );
+                }
+
+                state.bridge.arrived = true;
+            },
+            facts: () => [["Bridge transaction", tx(DEST, state.bridge.tx)]],
+        },
+        {
+            id: "sister",
+            title: "The protocol also runs on another chain",
+            chain: SISTER ?? DEST,
+            hidden: () => !SISTER,
+            section: SISTER?.bridge
+                ? undefined
+                : {
+                      title: "Trigger B: trouble on another chain",
+                      about:
+                          "The same protocol runs on a second chain. When that deployment is paused, you leave this " +
+                          "one, before the trouble can spread.",
+                  },
+            about: () =>
+                `Deploys the demo protocol's sister deployment on ${SISTER.name}. You are its guardian, so you can play ` +
+                `the incident response below.`,
+            ready: () => !!state.demo,
+            done: () => !!state.sister,
+            async run() {
+                const signer = await signerOn(SISTER);
+                const factory = new ethers.ContractFactory(
+                    ARTIFACTS.DemoSister.abi,
+                    ARTIFACTS.DemoSister.bytecode,
+                    signer,
+                );
+                const receipt = await send(
+                    "sister",
+                    "Sister deployment",
+                    factory.deploy(account).then((deployed) => deployed.deploymentTransaction()),
+                );
+
+                state.sister = { address: receipt.contractAddress, tx: receipt.hash };
+            },
+            facts: () => [
+                ["Sister deployment", address(SISTER, state.sister.address)],
+                ["Transaction", tx(SISTER, state.sister.tx)],
+            ],
+        },
+        {
+            id: "crosswire",
+            title: "Lay a tripwire across chains",
+            chain: REACT,
+            hidden: () => !SISTER,
+            about: () =>
+                `One transaction on Reactive Network: if the deployment on ${SISTER.name} is paused, leave the vault ` +
+                `on ${DEST.name}.`,
+            ready: () => !!state.sister && !!state.tripwires?.proxyTx,
+            done: () => !!state.crosswire,
+            async run() {
+                const signer = await signerOn(REACT);
+                const reactive = contract("ExitGuardReactive", state.reactive.address, signer);
+                const receipt = await send(
+                    "crosswire",
+                    "Cross-chain tripwire",
+                    reactive.watchPause(SISTER.chainId, state.sister.address, state.demo.vault),
+                );
+
+                state.crosswire = { tx: receipt.hash };
+            },
+            facts: () => [["Tripwire", tx(REACT, state.crosswire.tx)]],
+        },
+        {
+            id: "incident",
+            title: `An incident on ${SISTER?.name}`,
+            chain: SISTER ?? DEST,
+            hidden: () => !SISTER,
+            about: () =>
+                `You play the protocol's guardian and pause the deployment on ${SISTER.name}. Nothing happens to the ` +
+                `vault on ${DEST.name}, but the Paused event is the tripwire: your shares there should be redeemed ` +
+                `within seconds.`,
+            ready: () => !!state.crosswire && !!state.drill?.passedTx && !state.exit?.outcome,
+            blocked: () => {
+                if (state.incident?.outcome) return null;
+                if (state.exit?.outcome) return "Your position already left in this run (trigger A). Start over to try this one.";
+                if (state.crosswire && !state.drill?.passedTx) return "Run a drill first.";
+                return null;
+            },
+            done: () => !!state.incident?.outcome,
+            async run() {
+                const guard = contract("ExitGuard", state.guard.address, reader(DEST));
+
+                if (!state.incident?.pauseTx) {
+                    // Where to start looking for the exit on the vault's chain.
+                    const fromBlock = await reader(DEST).getBlockNumber();
+                    const signer = await signerOn(SISTER);
+                    const sister = contract("DemoSister", state.sister.address, signer);
+                    const receipt = await send("incident", "Pause", sister.pause());
+                    const block = await signer.provider.getBlock(receipt.blockNumber);
+
+                    state.incident = {
+                        pauseTx: receipt.hash,
+                        pauseBlock: receipt.blockNumber,
+                        pauseTime: block.timestamp,
+                        fromBlock,
+                    };
+                    save();
+                }
+
+                const vault = state.demo.vault;
+
+                const outcome = await waitFor("incident", `Waiting for the exit on ${DEST.name}`, async () => {
+                    for (const name of ["Exited", "ExitSkipped", "ExitFailed"]) {
+                        const found = await guard.queryFilter(guard.filters[name](vault), state.incident.fromBlock);
+                        if (found.length > 0) return { name, event: found[0] };
+                    }
+                    return null;
+                });
+
+                if (!outcome) throw new Error(unanswered());
+
+                const block = await reader(DEST).getBlock(outcome.event.blockNumber);
+
+                state.incident.outcome = outcome.name;
+                state.incident.exitTx = outcome.event.transactionHash;
+                state.incident.exitBlock = outcome.event.blockNumber;
+                state.incident.exitTime = block.timestamp;
+                state.incident.latencySeconds = block.timestamp - state.incident.pauseTime;
+
+                if (outcome.name === "Exited") {
+                    state.incident.shares = ethers.formatEther(outcome.event.args.shares);
+                    state.incident.assets = ethers.formatEther(outcome.event.args.assets);
+                } else if (outcome.name === "ExitSkipped") {
+                    state.incident.cause = SKIP_CAUSES[Number(outcome.event.args.cause)];
+                }
+
+                // Best effort: the reactive transaction that connected the two chains.
+                try {
+                    const reactive = contract("ExitGuardReactive", state.reactive.address, reader(REACT));
+                    const head = await reader(REACT).getBlockNumber();
+                    const tripped = await reactive.queryFilter(reactive.filters.Tripped(), Math.max(0, head - 5000));
+                    const match = tripped.find((event) => event.args.originTxHash === BigInt(state.incident.pauseTx));
+                    if (match) state.incident.reactiveTx = match.transactionHash;
+                } catch {
+                    // The explorer shows it too.
+                }
+            },
+            facts: () => {
+                const rows = [];
+
+                if (state.incident.outcome === "Exited") {
+                    rows.push([
+                        "Result",
+                        escape(`${state.incident.shares} shares redeemed for ${state.incident.assets} test dollars`),
+                    ]);
+                } else if (state.incident.outcome === "ExitSkipped") {
+                    rows.push(["Result", escape(`exit skipped: ${state.incident.cause}`)]);
+                } else {
+                    rows.push(["Result", "the vault refused the redemption"]);
+                }
+
+                rows.push(
+                    [
+                        "Incident to exit",
+                        escape(`${state.incident.latencySeconds} s, from ${SISTER.name} to ${DEST.name}`),
+                    ],
+                    [`1. Origin event (${SISTER.name})`, tx(SISTER, state.incident.pauseTx)],
+                    [
+                        "2. Reactive transaction",
+                        state.incident.reactiveTx ? tx(REACT, state.incident.reactiveTx) : "see the explorer",
+                    ],
+                    [`3. Callback (${DEST.name})`, tx(DEST, state.incident.exitTx)],
+                );
+
+                return rows;
+            },
+        },
     ];
 
     const unanswered = () =>
@@ -774,7 +1027,11 @@
                           .join("")}</dl>`
                     : "";
 
-                return `
+                const section = step.section
+                    ? `<h3 class="section">${escape(step.section.title)}<small>${escape(step.section.about)}</small></h3>`
+                    : "";
+
+                return `${section}
                     <div class="card ${state_}" id="step-${step.id}">
                         <div class="head">
                             <span class="title">${index + 1}. ${escape(step.title)}${step.optional ? " (optional)" : ""}</span>
@@ -791,6 +1048,7 @@
 
         document.getElementById("record").textContent = JSON.stringify(record(), null, 2);
         document.getElementById("refresh").disabled = !account;
+        renderExamples();
 
         if (!window.EXITGUARD_CONFIG?.destination) {
             const others = Object.entries(DESTINATIONS)
@@ -800,6 +1058,7 @@
 
             document.getElementById("chains").innerHTML =
                 `Vault chain: <strong>${escape(DEST.name)}</strong>. Reactive contract: <strong>${escape(REACT.name)}</strong>. ` +
+                (SISTER ? `Other chain: <strong>${escape(SISTER.name)}</strong>. ` : "") +
                 `Also available: ${others}.`;
         }
     }
@@ -810,6 +1069,7 @@
             account,
             destination: { chain: DEST.name, chainId: DEST.chainId, callbackProxy: DEST.callbackProxy },
             reactiveNetwork: { chain: REACT.name, chainId: REACT.chainId },
+            ...(SISTER ? { otherChain: { chain: SISTER.name, chainId: SISTER.chainId } } : {}),
             ...state,
         };
     }
@@ -876,6 +1136,18 @@
         await attempt(`Wallet on ${DEST.name}`, async () => ether(await destination.getBalance(account), DEST.currency));
         await attempt(`Wallet on ${REACT.name}`, async () => ether(await reactiveChain.getBalance(account), REACT.currency));
 
+        if (SISTER) {
+            const sisterChain = await bestReader(SISTER);
+
+            await attempt(`Wallet on ${SISTER.name}`, async () => ether(await sisterChain.getBalance(account), SISTER.currency));
+
+            if (state.sister) {
+                await attempt(`Deployment on ${SISTER.name}`, async () =>
+                    (await contract("DemoSister", state.sister.address, sisterChain).paused()) ? "paused" : "running",
+                );
+            }
+        }
+
         if (state.demo) {
             const usd = contract("MockUSD", state.demo.usd, destination);
             const vault = contract("DemoVault", state.demo.vault, destination);
@@ -902,7 +1174,7 @@
             await attempt("Guard debt to the callback proxy", async () => ether(await proxy.debt(state.guard.address), DEST.currency));
         }
 
-        if (state.drill?.passedTx && !state.exit?.outcome) {
+        if (state.drill?.passedTx && !state.exit?.outcome && !state.incident?.outcome) {
             await attempt("Exit rehearsal", async () => rehearsalText(await rehearse()));
         }
 
@@ -920,6 +1192,78 @@
 
         document.getElementById("status").innerHTML = `<dl>${rows.join("")}</dl>`;
     }
+
+    // ---------------------------------------------------------------------------------------------------------
+    // Vault scan (read-only, no wallet needed; the reading is done in scan.js)
+    // ---------------------------------------------------------------------------------------------------------
+
+    const SCAN = window.ExitGuardScan;
+    const scanChains = { ...(config.scanChains ?? {}), ...SCAN.CHAINS };
+
+    /// Vaults to try the scan on. The addresses were read back from the chain when this list was written.
+    const EXAMPLES = config.scanExamples ?? [];
+
+    const scanKeyOf = (chain) => Object.keys(scanChains).find((key) => scanChains[key].chainId === chain.chainId);
+
+    function renderExamples() {
+        const examples = [...EXAMPLES];
+        const demoKey = scanKeyOf(DEST);
+
+        if (state.demo && demoKey) {
+            examples.unshift({ label: "this run's demo vault", chain: demoKey, address: state.demo.vault });
+        }
+
+        document.getElementById("scan-examples").innerHTML =
+            examples.length === 0
+                ? ""
+                : "Try: " +
+                  examples
+                      .map(
+                          (example) =>
+                              `<button class="link" data-scan-chain="${escape(example.chain)}" ` +
+                              `data-scan-address="${escape(example.address)}">${escape(example.label)}</button>`,
+                      )
+                      .join(" · ");
+    }
+
+    async function runScan() {
+        const chain = scanChains[document.getElementById("scan-chain").value];
+        const result = document.getElementById("scan-result");
+
+        result.hidden = false;
+        result.className = "card running";
+        result.innerHTML = `<p class="about">Reading ${escape(chain.name)}...</p>`;
+
+        try {
+            const report = await SCAN.scan(chain, document.getElementById("scan-address").value.trim());
+            window.EXITGUARD_LAST_SCAN = report;
+            result.className = "card done";
+            result.innerHTML = SCAN.render(report);
+        } catch (error) {
+            window.EXITGUARD_LAST_SCAN = null;
+            result.className = "card error";
+            result.innerHTML = `<p class="note bad">${escape(error?.shortMessage ?? error?.message ?? String(error))}</p>`;
+        }
+    }
+
+    document.getElementById("scan-chain").innerHTML = Object.entries(scanChains)
+        .map(([key, chain]) => `<option value="${escape(key)}">${escape(chain.name)}</option>`)
+        .join("");
+
+    document.getElementById("scan-run").addEventListener("click", runScan);
+
+    document.getElementById("scan-address").addEventListener("keydown", (event) => {
+        if (event.key === "Enter") runScan();
+    });
+
+    document.getElementById("scan-examples").addEventListener("click", (event) => {
+        const { scanChain, scanAddress } = event.target?.dataset ?? {};
+        if (!scanAddress) return;
+
+        document.getElementById("scan-chain").value = scanChain;
+        document.getElementById("scan-address").value = scanAddress;
+        runScan();
+    });
 
     // ---------------------------------------------------------------------------------------------------------
     // Wiring

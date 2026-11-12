@@ -26,6 +26,9 @@
   main { max-width: 860px; margin: 0 auto; padding: 24px 16px 64px; }
   h1 { font-size: 28px; margin: 0 0 4px; letter-spacing: -0.01em; }
   h2 { font-size: 18px; margin: 32px 0 12px; }
+  h3 { font-size: 15px; margin: 18px 0 8px; }
+  h3.section { font-size: 16px; margin: 28px 0 10px; }
+  h3.section small { display: block; font-weight: 400; font-size: 14px; color: var(--muted); margin-top: 2px; }
   p { margin: 0 0 12px; }
   .lede { color: var(--muted); max-width: 62ch; }
   .bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 16px 0 8px; }
@@ -35,6 +38,12 @@
   }
   button.quiet { background: transparent; color: var(--ink); border-color: var(--line); font-weight: 500; }
   button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button.link { background: none; border: 0; padding: 0; color: var(--accent); font-weight: 500; text-decoration: underline; }
+  select, input[type="text"] {
+    font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--card); color: var(--ink);
+  }
+  input[type="text"] { flex: 1 1 320px; min-width: 0; font: 14px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   .card {
     background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px;
     margin: 0 0 12px;
@@ -57,14 +66,35 @@
   pre { background: var(--code); padding: 12px; border-radius: 8px; overflow-x: auto; margin: 0 0 12px; }
   a { color: var(--accent); }
   .who { font-size: 14px; color: var(--muted); }
+  dl.ways { grid-template-columns: minmax(160px, 30%) 1fr; }
+  dl.ways dd { margin-bottom: 8px; }
+  ul.wires { margin: 0; padding-left: 18px; font-size: 14px; }
+  ul.wires li { margin-bottom: 8px; overflow-wrap: anywhere; }
+  .why { color: var(--muted); }
+  .fine { font-size: 13px; color: var(--muted); margin: 14px 0 0; }
   footer { color: var(--muted); font-size: 14px; margin-top: 32px; }
 </style>
 </head>
 <body>
 <main>
   <h1>ExitGuard console</h1>
-  <p class="lede">A personal tripwire for vault deposits. This page deploys your own ExitGuard on testnets, runs a health
-    check, and plays the demo: a protocol queues an upgrade, and your deposit leaves before the new code goes live.</p>
+  <p class="lede">A personal tripwire for vault deposits. A timelock exists so that depositors can leave before a
+    change lands, but nobody watches one around the clock. ExitGuard does, and leaves for you.</p>
+
+  <h2>Who can change your vault?</h2>
+  <p class="about">Paste the address of a vault you use. The scan reads who can change it, how much warning you would
+    get, and which tripwires ExitGuard would lay. It only reads, and needs no wallet.</p>
+  <div class="bar">
+    <select id="scan-chain" aria-label="Chain"></select>
+    <input type="text" id="scan-address" placeholder="0x... vault address" spellcheck="false" autocomplete="off" aria-label="Vault address">
+    <button id="scan-run">Scan</button>
+  </div>
+  <p class="who" id="scan-examples"></p>
+  <div class="card" id="scan-result" hidden></div>
+
+  <h2>Try ExitGuard on testnets</h2>
+  <p class="about">Deploy your own ExitGuard, run a health check, and play either trigger: the protocol queues an upgrade,
+    or its deployment on another chain is paused. Both times your deposit leaves first.</p>
 
   <div class="bar">
     <button id="connect">Connect wallet</button>
@@ -73,7 +103,6 @@
 
   <p class="who" id="chains"></p>
 
-  <h2>Steps</h2>
   <div id="steps"></div>
 
   <h2>Status</h2>
@@ -92,7 +121,8 @@
 </main>
 
 <script src="vendor/ethers.umd.min.js"></script>
-<script src="artifacts.js?v=5"></script>
-<script src="app.js?v=5"></script>
+<script src="artifacts.js?v=6"></script>
+<script src="scan.js?v=6"></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>
