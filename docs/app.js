@@ -25,7 +25,9 @@
             callbackProxy: "0xAa14d9Cd0f788Ca23d11805986C1d8bd035D23b4",
             reactFaucet: "0x9b9BB25f1A81078C544C829c5EB7822d747Cf434",
             guardFunding: "0.003", // ETH kept by the guard for callbacks
-            fees: { maxPriorityFeePerGas: "0.05", maxFeePerGas: "1" }, // gwei
+            // gwei. Wallets reserve gas limit x max fee up front, and the demo deployment needs about 42 million
+            // gas on Sepolia, so the ceiling is kept low. The base fee there is a few wei.
+            fees: { maxPriorityFeePerGas: "0.05", maxFeePerGas: "0.1" },
         },
         "base-sepolia": {
             chainId: 84532,
@@ -244,6 +246,80 @@
         );
 
     // ---------------------------------------------------------------------------------------------------------
+    // Exit rehearsal
+    // ---------------------------------------------------------------------------------------------------------
+
+    const REQUEST_TYPE = "tuple(uint256 chainId, address recipient, uint256 gasLimit, bytes payload)";
+
+    /// Replays the transaction that delivered the drill, with the exit payload in place of the drill's and the
+    /// gas limit the reactive contract would ask for, as a simulation against the vault chain's current state.
+    /// Nothing is sent. The answer is what a real exit would do right now, including whether the gas is enough:
+    /// the first live run failed because that was guessed rather than measured.
+    async function rehearse() {
+        const provider = reader(DEST);
+        const coder = ethers.AbiCoder.defaultAbiCoder();
+        const guard = contract("ExitGuard", state.guard.address, provider);
+
+        const delivery = await provider.getTransaction(state.drill.passedTx);
+        const [head, body] = coder.decode(["uint256", "bytes"], ethers.dataSlice(delivery.data, 4));
+        const [request] = coder.decode([REQUEST_TYPE], body);
+
+        const limit = await contract("ExitGuardReactive", state.reactive.address, reader(REACT)).callbackGasLimit();
+        const payload = guard.interface.encodeFunctionData("exit", [
+            state.reactive.address,
+            state.demo.vault,
+            1, // an upgrade was scheduled
+            DEST.chainId,
+            0,
+        ]);
+        const input = ethers.concat([
+            ethers.dataSlice(delivery.data, 0, 4),
+            coder.encode(
+                ["uint256", "bytes"],
+                [head, coder.encode([REQUEST_TYPE], [[request.chainId, state.guard.address, limit, payload]])],
+            ),
+        ]);
+
+        // The relayer scales the transaction's gas with the requested limit; keep its ratio.
+        const gas = (delivery.gasLimit * limit) / request.gasLimit;
+
+        const [block] = await provider.send("eth_simulateV1", [
+            { blockStateCalls: [{ calls: [{ from: delivery.from, to: delivery.to, input, gas: ethers.toQuantity(gas) }] }] },
+            "latest",
+        ]);
+        const call = block.calls[0];
+        const event = call.logs
+            .map((log) => parse(guard.interface, log))
+            .find((parsed) => ["Exited", "ExitSkipped", "ExitFailed"].includes(parsed?.name));
+
+        return {
+            outcome: event?.name ?? "NotDelivered",
+            gasUsed: Number(call.gasUsed),
+            gasLimit: Number(limit),
+        };
+    }
+
+    const number = (value) => Number(value).toLocaleString("en-US");
+
+    function rehearsalText(result) {
+        if (!result) return "not available from this page";
+
+        switch (result.outcome) {
+            case "Exited":
+                return `an exit would succeed right now, using ${number(result.gasUsed)} of ${number(result.gasLimit)} gas`;
+            case "ExitSkipped":
+                return "there is nothing to redeem right now";
+            case "ExitFailed":
+                return (
+                    `AN EXIT WOULD FAIL: the vault does not complete the redemption within the callback's ` +
+                    `${number(result.gasLimit)} gas. Raise it with setCallbackGasLimit on the reactive contract.`
+                );
+            default:
+                return "the callback would not reach the guard";
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------------------
     // The steps
     // ---------------------------------------------------------------------------------------------------------
 
@@ -458,7 +534,8 @@
             repeatable: true,
             about: () =>
                 "A health check through the same path a real exit takes: the guard emits an event, Reactive Network " +
-                "delivers it, the reactive contract answers with a callback. Nothing is redeemed.",
+                "delivers it, the reactive contract answers with a callback. Nothing is redeemed. The console then " +
+                "replays that delivery as a simulation with the exit in its place, to check the gas is enough.",
             ready: () => !!state.tripwires?.proxyTx,
             done: () => !!state.drill?.passedTx,
             async run() {
@@ -493,12 +570,14 @@
                     state.drill.requestBlock,
                 );
                 state.drill.passedTx = passed[0]?.transactionHash ?? "(not found)";
+                state.drill.rehearsal = await rehearse().catch(() => null);
             },
             facts: () => [
                 ["Round trip", escape(`${state.drill.seconds} s, ${state.drill.blocks} blocks on ${DEST.name}`)],
                 ["Tripwires on this vault", escape(state.drill.tripwires)],
                 ["Request", tx(DEST, state.drill.requestTx)],
                 ["Answer (callback)", tx(DEST, state.drill.passedTx)],
+                ["Exit rehearsal", escape(rehearsalText(state.drill.rehearsal))],
             ],
         },
         {
@@ -820,6 +899,10 @@
             });
             await attempt("Guard gas money", async () => ether(await destination.getBalance(state.guard.address), DEST.currency));
             await attempt("Guard debt to the callback proxy", async () => ether(await proxy.debt(state.guard.address), DEST.currency));
+        }
+
+        if (state.drill?.passedTx && !state.exit?.outcome) {
+            await attempt("Exit rehearsal", async () => rehearsalText(await rehearse()));
         }
 
         if (state.reactive?.address) {
