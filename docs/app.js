@@ -134,6 +134,7 @@
     // ---------------------------------------------------------------------------------------------------------
 
     let account = null;
+    let sisterBalance = null; // the wallet's balance on the other chain, once the status panel has read it
     let state = {};
     let busy = null; // id of the step currently running
     const notes = {}; // transient progress or error text per step
@@ -770,46 +771,35 @@
             },
             about: () =>
                 `Sends ${SISTER.bridge.amount} ${DEST.currency} through ${SISTER.name}'s own bridge; it arrives at the ` +
-                `same address there a few minutes later. Skip this if the wallet already holds ${SISTER.currency} on ` +
-                `${SISTER.name}.`,
+                `same address there a few minutes later, and you can carry on with the other steps meanwhile. Skip ` +
+                `this if the wallet already holds ${SISTER.currency} on ${SISTER.name}.`,
             ready: () => true,
-            done: () => !!state.bridge?.arrived,
+            done: () => !!state.bridge?.tx,
             async run() {
-                if (!state.bridge?.tx) {
-                    const signer = await signerOn(DEST);
-                    const bridge = new ethers.Contract(
-                        SISTER.bridge.address,
-                        ["function bridgeETH(uint32 minGasLimit, bytes extraData) payable"],
-                        signer,
-                    );
-                    const before = await reader(SISTER).getBalance(account);
-                    const receipt = await send(
-                        "bridge",
-                        "Bridge",
-                        bridge.bridgeETH(200000, "0x", {
-                            value: ethers.parseEther(SISTER.bridge.amount),
-                            ...destinationFees(),
-                        }),
-                    );
-
-                    state.bridge = { tx: receipt.hash, before: before.toString() };
-                    save();
-                }
-
-                const arrived = await waitFor("bridge", `Waiting for the test ETH to arrive on ${SISTER.name}`, async () =>
-                    (await reader(SISTER).getBalance(account)) > BigInt(state.bridge.before) ? true : null,
+                const signer = await signerOn(DEST);
+                const bridge = new ethers.Contract(
+                    SISTER.bridge.address,
+                    ["function bridgeETH(uint32 minGasLimit, bytes extraData) payable"],
+                    signer,
+                );
+                const receipt = await send(
+                    "bridge",
+                    "Bridge",
+                    bridge.bridgeETH(200000, "0x", {
+                        value: ethers.parseEther(SISTER.bridge.amount),
+                        ...destinationFees(),
+                    }),
                 );
 
-                if (!arrived) {
-                    throw new Error(
-                        `Not there yet. Deposits to ${SISTER.name} usually take a few minutes: press the button again ` +
-                            `to keep waiting.`,
-                    );
-                }
-
-                state.bridge.arrived = true;
+                state.bridge = { tx: receipt.hash };
             },
-            facts: () => [["Bridge transaction", tx(DEST, state.bridge.tx)]],
+            facts: () => [
+                ["Bridge transaction", tx(DEST, state.bridge.tx)],
+                [
+                    `Arrived on ${SISTER.name}`,
+                    sisterBalance === null ? "unknown" : sisterBalance > 0n ? "yes" : "not yet; it takes a few minutes",
+                ],
+            ],
         },
         {
             id: "sister",
@@ -827,7 +817,13 @@
             about: () =>
                 `Deploys the demo protocol's sister deployment on ${SISTER.name}. You are its guardian, so you can play ` +
                 `the incident response below.`,
-            ready: () => !!state.demo,
+            ready: () => !!state.demo && sisterBalance !== 0n,
+            blocked: () => {
+                if (state.sister || sisterBalance !== 0n) return null;
+                return state.bridge?.tx
+                    ? `The bridged test ETH has not arrived on ${SISTER.name} yet. This page checks again every few seconds.`
+                    : `The wallet holds no ${SISTER.currency} on ${SISTER.name} yet.`;
+            },
             done: () => !!state.sister,
             async run() {
                 const signer = await signerOn(SISTER);
@@ -1129,6 +1125,7 @@
             }
         };
 
+        const sisterBalanceBefore = sisterBalance;
         const destination = await bestReader(DEST);
         const reactiveChain = await bestReader(REACT);
         const ether = (wei, unit) => `${ethers.formatEther(wei)} ${unit}`;
@@ -1139,7 +1136,10 @@
         if (SISTER) {
             const sisterChain = await bestReader(SISTER);
 
-            await attempt(`Wallet on ${SISTER.name}`, async () => ether(await sisterChain.getBalance(account), SISTER.currency));
+            await attempt(`Wallet on ${SISTER.name}`, async () => {
+                sisterBalance = await sisterChain.getBalance(account);
+                return ether(sisterBalance, SISTER.currency);
+            });
 
             if (state.sister) {
                 await attempt(`Deployment on ${SISTER.name}`, async () =>
@@ -1191,6 +1191,10 @@
         }
 
         document.getElementById("status").innerHTML = `<dl>${rows.join("")}</dl>`;
+
+        // A step may have been waiting for the balance this just read. Only then: redrawing the steps under
+        // someone's pointer can swallow a click.
+        if (!busy && sisterBalance !== sisterBalanceBefore) render();
     }
 
     // ---------------------------------------------------------------------------------------------------------
@@ -1337,6 +1341,11 @@
     setInterval(() => {
         if (!busy && state.exit?.outcome && !state.upgrade) render();
     }, 1000);
+
+    // Watches for the bridged test ETH to arrive on the other chain.
+    setInterval(() => {
+        if (!busy && account && SISTER && sisterBalance === 0n && !state.sister) refresh();
+    }, 8000);
 
     render();
 
