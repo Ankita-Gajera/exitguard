@@ -157,6 +157,12 @@
         }
     };
 
+    /// Whether the position has left the vault and has not come back, as far as this run knows.
+    const hasLeft = () => {
+        const exits = [state.exit, state.incident].filter((entry) => entry?.outcome === "Exited").length;
+        return exits > (state.comeback?.armTx ? 1 : 0);
+    };
+
     // ---------------------------------------------------------------------------------------------------------
     // Chain access
     // ---------------------------------------------------------------------------------------------------------
@@ -322,6 +328,25 @@
             gasUsed: Number(call.gasUsed),
             gasLimit: Number(limit),
         };
+    }
+
+    /// The reactive contract ignores a second alarm for the same vault inside its cooldown, so that one governance
+    /// action cannot pay for several exits. Says so before a trigger is pulled in vain.
+    async function assertCooldownOver() {
+        const reactive = contract("ExitGuardReactive", state.reactive.address, reader(REACT));
+        const [last, cooldown, block] = await Promise.all([
+            reactive.lastFiredAt(state.demo.vault),
+            reactive.cooldown(),
+            reader(REACT).getBlock("latest"),
+        ]);
+        const left = Number(last + cooldown) - block.timestamp;
+
+        if (last > 0n && left > 0) {
+            throw new Error(
+                `Too soon. The reactive contract ignores a second alarm for the same vault for ` +
+                    `${window.ExitGuardScan.duration(Number(cooldown))}. Try again in ${left} s.`,
+            );
+        }
     }
 
     const number = (value) => Number(value).toLocaleString("en-US");
@@ -618,10 +643,10 @@
                 "You now play the protocol's admin and queue an upgrade of the vault in the timelock. That emits " +
                 "CallScheduled with the vault as target, which is the tripwire. Your shares should be redeemed within " +
                 "seconds, while the vault still runs the old code.",
-            ready: () => !!state.drill?.passedTx && !state.incident?.outcome,
+            ready: () => !!state.drill?.passedTx && !hasLeft(),
             blocked: () =>
-                state.incident?.outcome && !state.exit?.outcome
-                    ? "Your position already left in this run (trigger B). Start over to try this one."
+                !state.exit?.outcome && hasLeft()
+                    ? "Your position has left the vault. Come back first: the last step on this page."
                     : null,
             done: () => !!state.exit?.outcome,
             async run() {
@@ -629,6 +654,8 @@
                 const timelock = contract("TimelockController", state.demo.timelock, signer);
 
                 if (!state.exit?.scheduleTx) {
+                    await assertCooldownOver();
+
                     const delay = await timelock.getMinDelay();
                     const receipt = await send(
                         "queue",
@@ -732,7 +759,11 @@
             blocked: () => {
                 if (!state.exit?.outcome) return null;
                 const left = Math.ceil(state.exit.executableAt + 2 - Date.now() / 1000);
-                return left > 0 ? `The timelock opens in ${left} s.` : null;
+                if (left > 0) return `The timelock opens in ${left} s.`;
+
+                return state.crosswire && !state.incident?.outcome
+                    ? "The upgrade freezes the vault for good. To play trigger B in this run as well, come back and play it first."
+                    : null;
             },
             done: () => !!state.upgrade,
             async run() {
@@ -877,10 +908,10 @@
                 `You play the protocol's guardian and pause the deployment on ${SISTER.name}. Nothing happens to the ` +
                 `vault on ${DEST.name}, but the Paused event is the tripwire: your shares there should be redeemed ` +
                 `within seconds.`,
-            ready: () => !!state.crosswire && !!state.drill?.passedTx && !state.exit?.outcome,
+            ready: () => !!state.crosswire && !!state.drill?.passedTx && !hasLeft(),
             blocked: () => {
                 if (state.incident?.outcome) return null;
-                if (state.exit?.outcome) return "Your position already left in this run (trigger A). Start over to try this one.";
+                if (hasLeft()) return "Your position has left the vault. Come back first: the last step on this page.";
                 if (state.crosswire && !state.drill?.passedTx) return "Run a drill first.";
                 return null;
             },
@@ -889,6 +920,8 @@
                 const guard = contract("ExitGuard", state.guard.address, reader(DEST));
 
                 if (!state.incident?.pauseTx) {
+                    await assertCooldownOver();
+
                     // Where to start looking for the exit on the vault's chain.
                     const fromBlock = await reader(DEST).getBlockNumber();
                     const signer = await signerOn(SISTER);
@@ -972,6 +1005,64 @@
 
                 return rows;
             },
+        },
+        {
+            id: "comeback",
+            title: "Come back: deposit again and re-arm",
+            chain: DEST,
+            section: {
+                title: "After an exit",
+                about: "A false alarm, or you have read the change and like it. The tripwires are still in place.",
+            },
+            about: () =>
+                "Three transactions next to the vault: let it take your test dollars, deposit them again, and arm the " +
+                "position. Your guard's allowance on the shares is still there. After this the other trigger can run.",
+            ready: () => hasLeft() && !state.comeback?.armTx && !state.upgrade,
+            blocked: () =>
+                hasLeft() && !state.comeback?.armTx && state.upgrade
+                    ? "The vault now runs the code that freezes withdrawals. There is nothing to come back to: start over."
+                    : null,
+            done: () => !!state.comeback?.armTx,
+            async run() {
+                const signer = await signerOn(DEST);
+                const usd = contract("MockUSD", state.demo.usd, signer);
+                const vault = contract("DemoVault", state.demo.vault, signer);
+                state.comeback ??= {};
+
+                if (!state.comeback.depositTx) {
+                    const amount = await usd.balanceOf(account);
+                    if (amount === 0n) throw new Error("This wallet holds no test dollars to deposit.");
+
+                    if (!state.comeback.approveTx) {
+                        const receipt = await send(
+                            "comeback",
+                            "Allowance",
+                            usd.approve(state.demo.vault, amount, destinationFees()),
+                        );
+                        state.comeback.approveTx = receipt.hash;
+                        save();
+                    }
+
+                    const receipt = await send("comeback", "Deposit", vault.deposit(amount, account, destinationFees()));
+                    state.comeback.depositTx = receipt.hash;
+                    state.comeback.assets = ethers.formatEther(amount);
+                    save();
+                }
+
+                const guard = contract("ExitGuard", state.guard.address, signer);
+                const receipt = await send(
+                    "comeback",
+                    "Arm",
+                    guard.arm(state.demo.vault, ethers.ZeroAddress, destinationFees()),
+                );
+                state.comeback.armTx = receipt.hash;
+            },
+            facts: () => [
+                ["Deposited again", escape(`${state.comeback.assets} test dollars`)],
+                ["Allowance", tx(DEST, state.comeback.approveTx)],
+                ["Deposit", tx(DEST, state.comeback.depositTx)],
+                ["Arm", tx(DEST, state.comeback.armTx)],
+            ],
         },
     ];
 
@@ -1174,7 +1265,7 @@
             await attempt("Guard debt to the callback proxy", async () => ether(await proxy.debt(state.guard.address), DEST.currency));
         }
 
-        if (state.drill?.passedTx && !state.exit?.outcome && !state.incident?.outcome) {
+        if (state.drill?.passedTx && !hasLeft()) {
             await attempt("Exit rehearsal", async () => rehearsalText(await rehearse()));
         }
 
@@ -1289,7 +1380,13 @@
     }
 
     function setAccount(value) {
-        account = value ? ethers.getAddress(value) : null;
+        const next = value ? ethers.getAddress(value) : null;
+
+        // Loading the saved run replaces `state`. Never do that under a running step, which would then write its
+        // result into the old object, and there is no need to for the account already shown.
+        if (busy || next === account) return;
+
+        account = next;
 
         if (account) {
             load();
