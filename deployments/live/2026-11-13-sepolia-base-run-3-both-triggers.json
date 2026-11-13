@@ -1,0 +1,136 @@
+{
+  "note": "Third live run, 13 Nov 2026, with the current code. Both triggers on one deployment: an upgrade queued on the vault's chain (exit in 24 s), a come-back, then the sister deployment paused on Base Sepolia (exit on Ethereum Sepolia in 14 s). The upgrade was executed last.",
+  "console": "https://ankita-gajera.github.io/exitguard/",
+  "account": "0xC5f57A210454baafE9fc145bBf161deF3bea3d4E",
+  "destination": {
+    "chain": "Ethereum Sepolia",
+    "chainId": 11155111,
+    "callbackProxy": "0xAa14d9Cd0f788Ca23d11805986C1d8bd035D23b4"
+  },
+  "reactiveNetwork": {
+    "chain": "Reactive Lasna",
+    "chainId": 5318007
+  },
+  "otherChain": {
+    "chain": "Base Sepolia",
+    "chainId": 84532
+  },
+  "demo": {
+    "tx": "0x5e1ef67ed38c3ae97a0cf100568db570f57a4df083c533cb960e315514ba0b71",
+    "usd": "0xf26767D11B8F6E26D5d7C121e1042653CF1f02B8",
+    "timelock": "0x108d1305B5a360f7E5D932Cedfc722BE7386078a",
+    "vault": "0xc689DB4543e8295778C69d481Ef8090cf148e09d",
+    "vaultV2": "0x9d9964Adefc5181b925ad92414720Ea88D3169e4"
+  },
+  "reactive": {
+    "address": "0xf0554b48D24a8bdCDd1CD427C3a9720d4e519199",
+    "tx": "0xd2fd4704d20a91b3057050caa48bc5a70b30f205bd1d08ef5c2bbb6ba27d120b"
+  },
+  "guard": {
+    "address": "0xfC7B42E7DE179c899F64414352a993FE61Cc493e",
+    "tx": "0xff6fb8b586742800d31c39d60f592b95e853557d7eb5d506f2a728b30e43957b",
+    "approveTx": "0xbb11941c48e7bce4b2aed44061982905fd885d597e79475abd608376d462a79d",
+    "armTx": "0x1ddaa9f2c1c31980e01d5b54c510a757ae63d1aff9c7e8efa6346a86c3998e4a"
+  },
+  "tripwires": {
+    "setGuardTx": "0x329a621155d63fbbb06b1539c9d0139f10324840d8578726482a22b13607eda3",
+    "timelockTx": "0xd310ee438787187d657c5d12ee0d3b0019953ccb50bcaa72ffbb5ae233b05f97",
+    "proxyTx": "0x03acd1a6a1ea267c697dcd1b1a8ed4645418ea6060025885b85b4547f07b7fbc"
+  },
+  "firstDrill": {
+    "nonce": 1,
+    "requestTx": "0x1c28e21d40b08aae0b4f4cd7403de36423f202d603d883991488c9e56f9d75a6",
+    "requestBlock": 12123992,
+    "seconds": 12,
+    "blocks": 1,
+    "tripwires": 3,
+    "passedTx": "0x3ae658543ba8eeac85f797699076f48ed7997450fbcf2eb47b14ef0744c58952",
+    "rehearsal": {
+      "outcome": "Exited",
+      "gasUsed": 229200,
+      "gasLimit": 1000000
+    }
+  },
+  "exit": {
+    "scheduleTx": "0xcadd7b1e485dd0f12973f419f44116f6e8f914c2c0a0419f437699b6387de676",
+    "scheduleBlock": 12124008,
+    "scheduleTime": 1794549180,
+    "executableAt": 1794549300,
+    "outcome": "Exited",
+    "reactiveTx": "0xa093d641b1dac6b0a77e03ff3c887800c5bc47aeabfb60ce185878118b673ea2",
+    "reactiveBlock": 8223235,
+    "reactiveTime": 1794549180,
+    "exitTx": "0xc6d3d27e45e8a9cb169633387713dc365c751f2c58038f31580b94cc84728b01",
+    "exitBlock": 12124010,
+    "exitTime": 1794549204,
+    "latencySeconds": 24,
+    "latencyBlocks": 2,
+    "shares": "1000.0",
+    "assets": "1000.0",
+    "callbackGasLimit": 1000000,
+    "callbackGasUsed": 255444
+  },
+  "bridge": {
+    "tx": "0xe1afc775f0411eacbfef47d8581f3e4023f1ae0850bbb254fef7d1a6dcbfda0d"
+  },
+  "sister": {
+    "address": "0x8F0425d7ae9Be2954f83b147fD3347D2649a8eF7",
+    "tx": "0x976c58a94a012dd6a4810d1a00595e5766477b619562db5c373a0c76727ffff4"
+  },
+  "crosswire": {
+    "tx": "0xcaf5b15575d293970aa6423af588db490d4c2c471c9dc96fb220ce8f0cf86842"
+  },
+  "comeback": {
+    "approveTx": "0xacc375ba9f89d3b548b4a92b9e6e3586742c069ba6abeb5fb342cea11fd124ff",
+    "depositTx": "0x06cda8e44e632c850c9f7873d373531a16acee807b74d0faa49095d2571df640",
+    "assets": "1000.0",
+    "armTx": "0x4dd49d1f3d74ce0990dc22d54408cbc75510259052144a490963f4cfee7a3e8d",
+    "armTime": 1794556656
+  },
+  "drill": {
+    "nonce": 3,
+    "requestTx": "0xede5766c58a004075f70450566f7c7d78654df4d8cb725e2b0ac7f8874f6895b",
+    "requestBlock": 12124636,
+    "seconds": 12,
+    "blocks": 1,
+    "tripwires": 4,
+    "passedTx": "0x829c118020f4277b101eacda01bd157bfabd8b944e6d5c303423bfe209014d19",
+    "rehearsal": {
+      "outcome": "Exited",
+      "gasUsed": 229200,
+      "gasLimit": 1000000
+    }
+  },
+  "incident": {
+    "pauseTx": "0x126f40d82214c450a36bdb2d9b798c3af92aa6d6a0b1162b05be782f12cedb28",
+    "pauseBlock": 58175010,
+    "pauseTime": 1794556870,
+    "outcome": "Exited",
+    "reactiveTx": "0x17d7fc15a3725750bc4cd89497aa99c08db71a7dd4ada7a8f76c9002c2e58ea5",
+    "reactiveBlock": 8230472,
+    "reactiveTime": 1794556871,
+    "exitTx": "0x72f1f4cf0497b51081e53f158505e00592c6b5cd5167fc64279cc111770f1d08",
+    "exitBlock": 12124641,
+    "exitTime": 1794556884,
+    "latencySeconds": 14,
+    "shares": "1000.0",
+    "assets": "1000.0",
+    "callbackGasLimit": 1000000,
+    "callbackGasUsed": 255444
+  },
+  "upgrade": {
+    "tx": "0xd42dd070c68600cc9c7fd901dd8008c4128ae232e6434577d00af81348aa9169",
+    "block": 12124645,
+    "time": 1794556932,
+    "version": "2",
+    "bobCanRedeem": "0.0"
+  },
+  "after": {
+    "yourTestDollars": "1000.0",
+    "yourVaultShares": "0.0",
+    "bobVaultShares": "1000.0",
+    "bobCanRedeem": "0.0",
+    "sisterDeployment": "paused",
+    "tripwiresOnTheVault": 4
+  }
+}
